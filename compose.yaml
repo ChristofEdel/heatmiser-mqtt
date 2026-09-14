@@ -1,0 +1,17 @@
+services:
+  heatmiser-mqtt:
+    build: .
+    container_name: heatmiser-mqtt
+    restart: unless-stopped
+
+    # Ensure signals/process cleanup are handled properly
+    init: true
+
+    # Give the application time to shut down cleanly
+    stop_grace_period: 10s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
