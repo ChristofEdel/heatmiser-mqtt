@@ -1,9 +1,14 @@
+#--------------------------------------------------------------------------------------------------
+# region Imports
+#--------------------------------------------------------------------------------------------------
+
+import asyncio
 import json
 import math
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable
+from typing import Awaitable, Callable
 
 import paho.mqtt.client as mqtt
 from paho.mqtt.packettypes import PacketTypes
@@ -21,17 +26,21 @@ from const import (
     LOGGER,
 )
 
+# endregion
+#--------------------------------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+# region Configuration
+#--------------------------------------------------------------------------------------------------
 
 MQTT_QOS = 1
 
+# endregion
+#--------------------------------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# State
-# ---------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+# region State
+#--------------------------------------------------------------------------------------------------
 
 # connection management
 _mqtt_client: mqtt.Client | None = None
@@ -47,25 +56,40 @@ _last_published_payload: dict[str, str] = {}
 # and every MQTT reconnect
 _force_republish = True
 
+# endregion
+#--------------------------------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Hooks for write operations
-# ---------------------------------------------------------------------------
+#--------------------------------------------------------------------------------------------------
+# region Hooks for write operations
+#--------------------------------------------------------------------------------------------------
 
 @dataclass(slots=True)
 class MqttCommandHandlers:
-    thermostat_enabled:            Callable[[int, bool],  None] | None = None
-    thermostat_target_temperature: Callable[[int, float], None] | None = None
-    floor_limit_temperature:       Callable[[int, float], None] | None = None
-    timeclock_enabled:             Callable[[int, bool],  None] | None = None
+    thermostat_set_enabled:     Callable[[int, bool],  Awaitable[None]] | None = None
+    thermostat_set_temperature: Callable[[int, float], Awaitable[None]] | None = None
+    thermostat_set_floor_limit: Callable[[int, float], Awaitable[None]] | None = None
+    timeclock_set_enabled:      Callable[[int, bool],  Awaitable[None]] | None = None
 
 
 mqtt_handlers = MqttCommandHandlers()
 
+def mqtt_set_command_handlers(
+    thermostat_set_enabled: Callable[[int, bool], None] | None = None,
+    thermostat_set_temperature: Callable[[int, float], None] | None = None,
+    thermostat_set_floor_limit: Callable[[int, float], None] | None = None,
+    timeclock_set_enabled: Callable[[int, bool], None] | None = None,
+) -> None:
+    mqtt_handlers.thermostat_set_enabled     = thermostat_set_enabled
+    mqtt_handlers.thermostat_set_temperature = thermostat_set_temperature
+    mqtt_handlers.thermostat_set_floor_limit = thermostat_set_floor_limit
+    mqtt_handlers.timeclock_set_enabled      = timeclock_set_enabled
 
-# ---------------------------------------------------------------------------
-# MQTT setup
-# ---------------------------------------------------------------------------
+# endregion
+#--------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------------------
+# region MQTT connection
+#--------------------------------------------------------------------------------------------------
 
 def mqtt_start(
     host: str,
@@ -74,6 +98,8 @@ def mqtt_start(
     password: str | None = None,
 ) -> mqtt.Client:
     global _mqtt_client
+
+    LOGGER.info(f"MQTT: Connecting to broker {host}:{port}")
 
     # Set up the client and credentials (if proviced)
     client = mqtt.Client(
@@ -158,8 +184,17 @@ def _on_connect(client, userdata, flags, reason_code, properties) -> None:
     with _mqtt_lock:
         _mqtt_connected.set()
 
+    LOGGER.info("MQTT: Connected, client started")
 
-def _on_disconnect(_client, _userdata, _disconnect_flags, _reason_code, _properties):
+
+def _on_disconnect(_client, _userdata, disconnect_flags, reason_code, properties):
+    LOGGER.info(
+        "MQTT disconnected: reason=%s (%s), from_server=%s, properties=%s",
+        reason_code,
+        reason_code.value,
+        disconnect_flags.is_disconnect_packet_from_server,
+        properties,
+    )
     _mqtt_connected.clear()
 
 
@@ -173,26 +208,35 @@ def mqtt_stop() -> None:
     if client is None:
         return
 
-    # Set disconnect reason so the 'will' for the availability topic
-    # will be published after the configured delay
-    reason = ReasonCode(
-        PacketTypes.DISCONNECT,
-        "Disconnect with will message",     # Magic string, do not change!
-    )
+    try:
+        # Set disconnect reason so the 'will' for the availability topic
+        # will be published after the configured delay
+        reason = ReasonCode(
+            PacketTypes.DISCONNECT,
+            "Disconnect with will message",     # Magic string, do not change!
+        )
 
-    client.disconnect(reasoncode=reason)
-    client.loop_stop()
+        client.disconnect(reasoncode=reason)
+        client.loop_stop()
 
-    _mqtt_connected.clear()
-    _mqtt_client = None
+        _mqtt_connected.clear()
+        _mqtt_client = None
 
+    except Exception as exc:
+        LOGGER.error(
+            "MQTT: Error while stopping: %s",
+            exc,
+        )
 
-# ---------------------------------------------------------------------------
-# State topic generation for a zone
-# ---------------------------------------------------------------------------
+# endregion
+#--------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------------------
+# region Topic/payload generation for a single zone
+#--------------------------------------------------------------------------------------------------
 
 def _zone_payloads(zone: ThermostatData) -> dict[str, str]:
-    """Generate the retained topics which currently exist for the given zone."""
+    """Generate the topics and their payloads for the given zone."""
 
     base = f"{MQTT_ROOT}/{zone.zone_id}"
 
@@ -237,78 +281,14 @@ def _float_payload(value: float | None) -> str:
     return f"{value:.1f}"
 
 
-# ---------------------------------------------------------------------------
-# Publishing topics
-# ---------------------------------------------------------------------------
+# endregion
+#--------------------------------------------------------------------------------------------------
 
-def _publish_retained_topic(topic: str, payload: str | None, always: bool) -> bool:
-    """
-    Publish the given topic with the given payload.
-    payload=None deletes the retained topic.
-    If the payload is unchanged since the topic was last updated, it is NOT
-    republished unless 'always' is true.
-    """
-    client = _mqtt_client
+#--------------------------------------------------------------------------------------------------
+# region Publishing topics
+#--------------------------------------------------------------------------------------------------
 
-    if client is None or not _mqtt_connected.is_set():
-        return False
-
-    now = time.monotonic()
-    if payload is None:
-        # Zero-length retained publication deletes retained state.
-        if not(always or topic in _last_published_payload):
-            return True
-        info = client.publish(
-            topic,
-            payload=b"",
-            qos=MQTT_QOS,
-            retain=True,
-        )
-    else:
-        changed = (
-            topic not in _last_published_payload
-            or _last_published_payload[topic] != payload
-        )
-        refresh = _refresh_due(topic, now)
-        if not (always or changed or refresh):
-            return True
-        info = client.publish(
-            topic,
-            payload=payload,
-            qos=MQTT_QOS,
-            retain=True,
-            properties=_publish_properties(),
-        )
-        LOGGER.debug(f"Published {topic} = {payload}")
-
-    if info.rc != mqtt.MQTT_ERR_SUCCESS:
-        LOGGER.warning(
-            "Failed to queue MQTT publication %s: %s",
-            topic,
-            info.rc,
-        )
-        return False
-
-    if payload is None:
-        _last_published.pop(topic, None)
-        _last_published_payload.pop(topic, None)
-    else:
-        _last_published[topic] = now
-        _last_published_payload[topic] = payload
-
-    return True
-
-def _publish_properties() -> Properties | None:
-    """Create the properties to ensure mesage expiry"""
-    if MQTT_RETAINED_EXPIRY_SECONDS is None:
-        return None
-
-    properties = Properties(PacketTypes.PUBLISH)
-    properties.MessageExpiryInterval = MQTT_RETAINED_EXPIRY_SECONDS
-    return properties
-
-
-def mqtt_publish(zones: dict[int, ThermostatData]):
+def mqtt_publish_zones(zones: dict[int, ThermostatData]):
     """
     Publish the latest Heatmiser state.
 
@@ -387,6 +367,74 @@ def mqtt_publish(zones: dict[int, ThermostatData]):
             _force_republish = False
 
 
+def _publish_retained_topic(topic: str, payload: str | None, always: bool) -> bool:
+    """
+    Publish the given topic with the given payload.
+    payload=None deletes the retained topic.
+    If the payload is unchanged since the topic was last updated, it is NOT
+    republished unless 'always' is true.
+    """
+    client = _mqtt_client
+
+    if client is None or not _mqtt_connected.is_set():
+        return False
+
+    now = time.monotonic()
+    if payload is None:
+        # Zero-length retained publication deletes retained state.
+        if not(always or topic in _last_published_payload):
+            return True
+        info = client.publish(
+            topic,
+            payload=b"",
+            qos=MQTT_QOS,
+            retain=True,
+        )
+    else:
+        changed = (
+            topic not in _last_published_payload
+            or _last_published_payload[topic] != payload
+        )
+        refresh = _refresh_due(topic, now)
+        if not (always or changed or refresh):
+            return True
+        info = client.publish(
+            topic,
+            payload=payload,
+            qos=MQTT_QOS,
+            retain=True,
+            properties=_publish_properties(),
+        )
+        LOGGER.debug(f"Published {topic} = {payload}")
+
+    if info.rc != mqtt.MQTT_ERR_SUCCESS:
+        LOGGER.warning(
+            "Failed to queue MQTT publication %s: %s",
+            topic,
+            info.rc,
+        )
+        return False
+
+    if payload is None:
+        _last_published.pop(topic, None)
+        _last_published_payload.pop(topic, None)
+    else:
+        _last_published[topic] = now
+        _last_published_payload[topic] = payload
+
+    return True
+
+
+def _publish_properties() -> Properties | None:
+    """Create the properties to ensure mesage expiry"""
+    if MQTT_RETAINED_EXPIRY_SECONDS is None:
+        return None
+
+    properties = Properties(PacketTypes.PUBLISH)
+    properties.MessageExpiryInterval = MQTT_RETAINED_EXPIRY_SECONDS
+    return properties
+
+
 def _refresh_due(topic: str, now: float) -> bool:
     if MQTT_RETAINED_EXPIRY_SECONDS is None:
         return False
@@ -402,9 +450,12 @@ def _refresh_due(topic: str, now: float) -> bool:
 
     return now - last >= refresh_after
 
-# ---------------------------------------------------------------------------
-# Discovery configuration for home assistant
-# ---------------------------------------------------------------------------
+# endregion
+#--------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------------------
+# region Discovery configuration for home assistant
+#--------------------------------------------------------------------------------------------------
 
 def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> None:
     client = _mqtt_client
@@ -524,15 +575,109 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> No
             retain=True,
         )
 
+# endregion
+#--------------------------------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Incoming command handling
-# ---------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------------------
+# region Incoming command handling
+#--------------------------------------------------------------------------------------------------
+
+_MQTT_COMMANDS = {
+    ("thermostat", "enabled"):            ("thermostat_set_enabled",     "bool"),
+    ("thermostat", "target_temperature"): ("thermostat_set_temperature", "float"),
+    ("floor",      "limit_temperature"):  ("thermostat_set_floor_limit", "float"),
+    ("timeclock",  "enabled"):            ("timeclock_set_enabled",      "bool"),
+}
+
+
+_mqtt_asyncio_loop: asyncio.AbstractEventLoop | None = None
+
+def mqtt_set_command_processing_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Set the loop on which the commands are executed"""
+    # call in main with (asyncio.get_running_loop()) as argument
+    global _mqtt_asyncio_loop
+    _mqtt_asyncio_loop = loop
+
+def _on_message(client, userdata, message) -> None:
+
+    # Do not process an accidentally-retained command.
+    if message.retain:
+        LOGGER.warning(
+            "Ignoring retained MQTT command: %s",
+            message.topic,
+        )
+        return
+
+    # Split the topic
+    # heatmiser/<zone_id>/<type>/set/<field>
+    parts = message.topic.split("/")
+    if (
+        len(parts) != 5
+        or parts[0] != MQTT_ROOT
+        or parts[3] != "set"
+    ):
+        LOGGER.warning(f"MQTT: Unknown command topic: '{message.topic}'")
+        return
+
+    try:
+        zone_id = int(parts[1])
+        command = (parts[2], parts[4])
+
+        # get the command definition
+        command_definition = _MQTT_COMMANDS.get(command)
+        if command_definition is None:
+            raise ValueError("Unsupported command")
+
+        handler_name, argument_type = command_definition
+
+        handler = getattr(mqtt_handlers, handler_name)
+        if handler is None:
+            raise RuntimeError(f"Handler '{handler_name}' is not configured")
+
+        if _mqtt_asyncio_loop is None:
+            raise RuntimeError("asyncio event loop is not configured")
+
+        payload = message.payload.decode("utf-8")
+        value = _parse(payload, argument_type)
+
+        future = asyncio.run_coroutine_threadsafe(
+            handler(zone_id, value),
+            _mqtt_asyncio_loop,
+        )
+
+        future.add_done_callback(
+            lambda f, topic=message.topic: _mqtt_command_done(topic, f)
+        )
+
+    except (UnicodeDecodeError, ValueError, RuntimeError) as exc:
+        LOGGER.warning(
+            "MQTT: Ignoring command '%s': %s",
+            message.topic,
+            exc,
+        )
+
+
+def _mqtt_command_done(topic: str, future) -> None:
+    try:
+        future.result()
+    except Exception:
+        LOGGER.exception(
+            "MQTT command failed: %s",
+            topic,
+        )
+
 
 _TRUE_VALUES = {"1", "true", "on", "heat"}
 _FALSE_VALUES = {"0", "false", "off"}
 
-
+def _parse(payload: str, type: str):
+    if type == "bool":
+        return _parse_bool(payload)
+    elif type == "float":
+        return _parse_float(payload)
+    return None
+    
 def _parse_bool(payload: str) -> bool:
     value = payload.strip().lower()
 
@@ -553,92 +698,13 @@ def _parse_float(payload: str) -> float:
 
     return value
 
+# endregion
+#--------------------------------------------------------------------------------------------------
 
-def _on_message(client, userdata, message) -> None:
-    # Do not ever replay an accidentally-retained command.
-    if message.retain:
-        LOGGER.warning(
-            "Ignoring retained MQTT command: %s",
-            message.topic,
-        )
-        return
+#--------------------------------------------------------------------------------------------------
+# region Loop on which to run command execution
+#--------------------------------------------------------------------------------------------------
 
-    parts = message.topic.split("/")
-
-    # heatmiser/<zone_id>/<type>/set/<field>
-    if (
-        len(parts) != 5
-        or parts[0] != MQTT_ROOT
-        or parts[3] != "set"
-    ):
-        return
-
-    try:
-        zone_id = int(parts[1])
-        device_type = parts[2]
-        field = parts[4]
-        payload = message.payload.decode("utf-8")
-
-        if device_type == "thermostat":
-            if field == "enabled":
-                if mqtt_handlers.thermostat_enabled is None:
-                    raise RuntimeError(
-                        "thermostat_enabled handler is not configured"
-                    )
-
-                mqtt_handlers.thermostat_enabled(
-                    zone_id,
-                    _parse_bool(payload),
-                )
-                return
-
-            if field == "target_temperature":
-                if mqtt_handlers.thermostat_target_temperature is None:
-                    raise RuntimeError(
-                        "thermostat_target_temperature handler "
-                        "is not configured"
-                    )
-
-                mqtt_handlers.thermostat_target_temperature(
-                    zone_id,
-                    _parse_float(payload),
-                )
-                return
-
-        elif device_type == "floor":
-            if field == "limit_temperature":
-                if mqtt_handlers.floor_limit_temperature is None:
-                    raise RuntimeError(
-                        "floor_limit_temperature handler "
-                        "is not configured"
-                    )
-
-                mqtt_handlers.floor_limit_temperature(
-                    zone_id,
-                    _parse_float(payload),
-                )
-                return
-
-        elif device_type == "timeclock":
-            if field == "enabled":
-                if mqtt_handlers.timeclock_enabled is None:
-                    raise RuntimeError(
-                        "timeclock_enabled handler is not configured"
-                    )
-
-                mqtt_handlers.timeclock_enabled(
-                    zone_id,
-                    _parse_bool(payload),
-                )
-                return
-
-        raise ValueError(
-            f"Unsupported MQTT command: {message.topic}"
-        )
-
-    except (UnicodeDecodeError, ValueError, RuntimeError) as exc:
-        LOGGER.warning(
-            "Ignoring MQTT command %s: %s",
-            message.topic,
-            exc,
-        )
+        
+# endregion
+#--------------------------------------------------------------------------------------------------
