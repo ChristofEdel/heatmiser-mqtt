@@ -49,7 +49,7 @@ async def make_get_engineers_request(websocket) -> dict:
 
 async def send_set_floor_limit_command(websocket, zone_name: str, limit_temp: float):
     # { 'SET_FLOOR' :[28, '<zone name>'] }
-    request = f"{{ 'SET_FLOOR' : ['{limit_temp:.0f}', '{zone_name}'] }}"
+    request = f"{{ 'SET_FLOOR' : [{limit_temp:.0f}, '{zone_name}'] }}"
     LOGGER.info(f"Neohub: Command '{request}'")
     response = await _make_neohub_request(websocket, request)
     LOGGER.info(f"Neohub:  --> {response}")

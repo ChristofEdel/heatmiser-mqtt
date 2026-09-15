@@ -559,7 +559,7 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> No
 
             "temperature_unit":              "C",
             "precision":                     0.1,
-            "temp_step":                     0.5,
+            "temp_step":                     1.0,
 
         }
 
