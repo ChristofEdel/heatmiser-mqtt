@@ -54,10 +54,10 @@ _force_republish = True
 
 @dataclass(slots=True)
 class MqttCommandHandlers:
-    thermostat_on:                 Callable[[int, bool],  None] | None = None
+    thermostat_enabled:            Callable[[int, bool],  None] | None = None
     thermostat_target_temperature: Callable[[int, float], None] | None = None
     floor_limit_temperature:       Callable[[int, float], None] | None = None
-    timeclock_on:                  Callable[[int, bool],  None] | None = None
+    timeclock_enabled:             Callable[[int, bool],  None] | None = None
 
 
 mqtt_handlers = MqttCommandHandlers()
@@ -140,10 +140,10 @@ def _on_connect(client, userdata, flags, reason_code, properties) -> None:
     # Commands must never be published retained by the sender.
     client.subscribe(
         [
-            (f"{MQTT_ROOT}/+/thermostat/set/on", MQTT_QOS),
+            (f"{MQTT_ROOT}/+/thermostat/set/enabled", MQTT_QOS),
             (f"{MQTT_ROOT}/+/thermostat/set/target_temperature", MQTT_QOS),
             (f"{MQTT_ROOT}/+/floor/set/limit_temperature", MQTT_QOS),
-            (f"{MQTT_ROOT}/+/timeclock/set/on", MQTT_QOS),
+            (f"{MQTT_ROOT}/+/timeclock/set/enabled", MQTT_QOS),
         ]
     )
 
@@ -205,13 +205,13 @@ def _zone_payloads(zone: ThermostatData) -> dict[str, str]:
         result[f"{base}/name"] = zone.zone_name
 
     if zone.is_timeclock:
-        result[f"{base}/timeclock/on"] = _bool_payload(zone.on)
+        result[f"{base}/timeclock/enabled"] = _bool_payload(zone.enabled)
         result[f"{base}/timeclock/demand"] = _bool_payload(zone.demand)
 
     else:
         result[f"{base}/thermostat/current_temperature"] = _float_payload(zone.current_temperature)
         result[f"{base}/thermostat/target_temperature"] = _float_payload(zone.target_temperature)
-        result[f"{base}/thermostat/on"]             = _bool_payload(zone.on)
+        result[f"{base}/thermostat/enabled"]             = _bool_payload(zone.enabled)
         result[f"{base}/thermostat/demand"]         = _bool_payload(zone.demand)
         result[f"{base}/floor/current_temperature"] = _float_payload(zone.floor_current_temperature)
         result[f"{base}/floor/limit_temperature"]   = _float_payload(zone.floor_limit_temperature)
@@ -445,9 +445,9 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> No
             "availability_mode":            "all",
 
             "modes":                        ["off", "heat"],
-            "mode_state_topic":             f"{base}/thermostat/on",
+            "mode_state_topic":             f"{base}/thermostat/enabled",
             "mode_state_template":          "{{ 'heat' if value == 'true' else 'off' }}",
-            "mode_command_topic":           f"{base}/thermostat/set/on",
+            "mode_command_topic":           f"{base}/thermostat/set/enabled",
             "mode_command_template":        "{{ 'true' if value == 'heat' else 'false' }}",
 
             "current_temperature_topic":    f"{base}/thermostat/current_temperature",
@@ -578,13 +578,13 @@ def _on_message(client, userdata, message) -> None:
         payload = message.payload.decode("utf-8")
 
         if device_type == "thermostat":
-            if field == "on":
-                if mqtt_handlers.thermostat_on is None:
+            if field == "enabled":
+                if mqtt_handlers.thermostat_enabled is None:
                     raise RuntimeError(
-                        "thermostat_on handler is not configured"
+                        "thermostat_enabled handler is not configured"
                     )
 
-                mqtt_handlers.thermostat_on(
+                mqtt_handlers.thermostat_enabled(
                     zone_id,
                     _parse_bool(payload),
                 )
@@ -618,13 +618,13 @@ def _on_message(client, userdata, message) -> None:
                 return
 
         elif device_type == "timeclock":
-            if field == "on":
-                if mqtt_handlers.timeclock_on is None:
+            if field == "enabled":
+                if mqtt_handlers.timeclock_enabled is None:
                     raise RuntimeError(
-                        "timeclock_on handler is not configured"
+                        "timeclock_enabled handler is not configured"
                     )
 
-                mqtt_handlers.timeclock_on(
+                mqtt_handlers.timeclock_enabled(
                     zone_id,
                     _parse_bool(payload),
                 )

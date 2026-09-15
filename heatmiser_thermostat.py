@@ -14,7 +14,7 @@ class ThermostatData:
     current_temperature: float | None = None
     target_temperature: float | None = None
 
-    on: bool = False
+    enabled: bool = False
     demand: bool = False
 
     floor_current_temperature: float | None = None
@@ -34,7 +34,7 @@ class ThermostatData:
             "current_temperature": self.current_temperature,
             "current_temperature": self.current_temperature,
             "target_temperature": self.target_temperature,
-            "on": self.on,
+            "enabled": self.enabled,
             "demand": self.demand,
             "floor_current_temperature": self.floor_current_temperature,
             "floor_limit_temperature": self.floor_limit_temperature,
@@ -61,7 +61,7 @@ class ThermostatData:
                 f"| {_fmt(self.current_temperature, 4, 1)} " + 
                 f"| {_fmt(self.floor_current_temperature, 5, 1)} " + 
                 f"| {_fmt(self.floor_limit_temperature, 5, 1)} " + 
-                f"| { ' ON ' if self.on else '    ' } " +
+                f"| { ' ON ' if self.enabled else '    ' } " +
                 f"| { 'HEAT' if self.demand else '    ' } " +
                 "|"
             )
@@ -91,14 +91,14 @@ class ThermostatData:
         if not self.is_timeclock:
             self.current_temperature       = self._temperature(neohub_data.get("CURRENT_TEMPERATURE"))
             self.target_temperature        = self._temperature(neohub_data.get("CURRENT_SET_TEMPERATURE"))
-            self.on                        = not bool(neohub_data.get("STANDBY", False))
+            self.enabled                   = not bool(neohub_data.get("STANDBY", False))
             self.demand                    = bool(neohub_data.get("HEATING", False))
             self.floor_current_temperature = self._temperature(neohub_data.get("CURRENT_FLOOR_TEMPERATURE"))
             self.floor_limit_active        = bool(neohub_data.get("FLOOR_LIMIT", False))
         else:
             self.current_temperature       = None
             self.target_temperature        = None
-            self.on                        = not bool(neohub_data.get("STANDBY", False))
+            self.enabled                   = not bool(neohub_data.get("STANDBY", False))
             self.demand                    = bool(neohub_data.get("HEATING", False))
             self.floor_limit_temperature   = None
             self.floor_current_temperature = None
@@ -123,14 +123,14 @@ class ThermostatData:
         if not self.is_timeclock:
             self.current_temperature       = self._temperature(neohub_data.get("ACTUAL_TEMP"))
             self.target_temperature        = self._temperature(neohub_data.get("SET_TEMP"))
-            self.on                        = not bool(neohub_data.get("STANDBY", False))
+            self.enabled                   = not bool(neohub_data.get("STANDBY", False))
             self.demand                    = bool(neohub_data.get("HEAT_ON", False))
             self.floor_current_temperature = self._temperature(neohub_data.get("CURRENT_FLOOR_TEMPERATURE"))
             self.floor_limit_active        = bool(neohub_data.get("FLOOR_LIMIT", False))
         else:
             self.current_temperature       = None
             self.target_temperature        = None
-            self.on                        = not bool(neohub_data.get("STANDBY", False))
+            self.enabled                   = not bool(neohub_data.get("STANDBY", False))
             self.demand                    = bool(neohub_data.get("TIMER_ON", False))
             self.floor_limit_temperature   = None
             self.floor_current_temperature = None
