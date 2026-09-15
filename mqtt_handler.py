@@ -437,6 +437,7 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> No
 
         thermostat_config = {
             "name":                         zone.zone_name,
+            "icon":                         "mdi:thermometer",
             "unique_id":                    f"heatmiser_{zone_id}_thermostat",
             "default_entity_id":            f"climate.heatmiser_{zone_id}_thermostat",
 
@@ -483,6 +484,7 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> No
 
         floor_config = {
             "name":                          zone.zone_name + " (Floor)",
+            "icon":                          "mdi:heating-coil",
             "unique_id":                     f"heatmiser_{zone_id}_floor",
             "default_entity_id":             f"climate.heatmiser_{zone_id}_floor",
 
