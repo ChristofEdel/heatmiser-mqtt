@@ -1,6 +1,7 @@
 services:
   heatmiser-mqtt:
     build: .
+    image: heatmiser-mqtt:latest
     container_name: heatmiser-mqtt
     restart: unless-stopped
 
