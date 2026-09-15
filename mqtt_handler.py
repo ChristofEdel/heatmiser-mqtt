@@ -8,9 +8,18 @@ from typing import Callable
 import paho.mqtt.client as mqtt
 from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.properties import Properties
+from paho.mqtt.reasoncodes import ReasonCode
 
 from heatmiser_thermostat import ThermostatData
-from const import MQTT_ROOT, MQTT_RETAINED_EXPIRY_SECONDS, MQTT_REFRESH_FRACTION, LOGGER, MQTT_DISCOVERY_PREFIX
+from const import (
+    MQTT_CLIENT_NAME,
+    MQTT_ROOT,
+    MQTT_DISCOVERY_PREFIX,
+    MQTT_RETAINED_EXPIRY_SECONDS,
+    MQTT_REFRESH_FRACTION,
+    MQTT_AVAILABILITY_TIMER_SECONDS,
+    LOGGER,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +44,7 @@ _last_published: dict[str, float] = {}
 _last_published_payload: dict[str, str] = {}
 
 # Flag to indicate that everything has to be published, e.g., on first start
-# and every MQTT reconnect 
+# and every MQTT reconnect
 _force_republish = True
 
 
@@ -66,30 +75,47 @@ def mqtt_start(
 ) -> mqtt.Client:
     global _mqtt_client
 
+    # Set up the client and credentials (if proviced)
     client = mqtt.Client(
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+        client_id=MQTT_CLIENT_NAME,
         protocol=mqtt.MQTTv5,
     )
 
     if username is not None:
         client.username_pw_set(username, password)
 
+    # Create a 'last will and testament' for the .../availability
+    # topic so it will report offline 'MQTT_AVAILABILITY_WILL_SECONDS'
+    # after this bridge disconnects
+    will_properties = Properties(PacketTypes.WILLMESSAGE)
+    will_properties.WillDelayInterval = MQTT_AVAILABILITY_TIMER_SECONDS
+
     client.will_set(
         f"{MQTT_ROOT}/availability",
         payload="offline",
         qos=MQTT_QOS,
         retain=True,
+        properties=will_properties,
     )
 
     client.on_connect = _on_connect
     client.on_disconnect = _on_disconnect
     client.on_message = _on_message
-
-    # Paho automatically reconnects after an established connection is lost.
     client.reconnect_delay_set(min_delay=1, max_delay=30)
 
-    # connect() can raise OSError if the initial TCP connection fails.
-    result = client.connect(host, port, keepalive=60)
+    # connect() can raise an error if the initial TCP connection fails.
+    connect_properties = Properties(PacketTypes.CONNECT)
+    connect_properties.SessionExpiryInterval = 120
+
+    result = client.connect(
+        host,
+        port,
+        keepalive=60,
+        clean_start=False,
+        properties=connect_properties,
+    )
+
     if result != mqtt.MQTT_ERR_SUCCESS:
         raise RuntimeError(f"MQTT connect failed: {result}")
 
@@ -140,9 +166,6 @@ def _on_disconnect(_client, _userdata, _disconnect_flags, _reason_code, _propert
 def mqtt_stop() -> None:
     """
     Clean shutdown.
-
-    A clean MQTT disconnect does not trigger the Last Will, so explicitly
-    publish offline before disconnecting.
     """
     global _mqtt_client
 
@@ -150,16 +173,14 @@ def mqtt_stop() -> None:
     if client is None:
         return
 
-    if _mqtt_connected.is_set():
-        info = client.publish(
-            f"{MQTT_ROOT}/availability",
-            payload="offline",
-            qos=MQTT_QOS,
-            retain=True,
-        )
-        info.wait_for_publish(timeout=2.0)
+    # Set disconnect reason so the 'will' for the availability topic
+    # will be published after the configured delay
+    reason = ReasonCode(
+        PacketTypes.DISCONNECT,
+        "Disconnect with will message",     # Magic string, do not change!
+    )
 
-    client.disconnect()
+    client.disconnect(reasoncode=reason)
     client.loop_stop()
 
     _mqtt_connected.clear()
@@ -222,9 +243,9 @@ def _float_payload(value: float | None) -> str:
 
 def _publish_retained_topic(topic: str, payload: str | None, always: bool) -> bool:
     """
-    Publish the given topic with the given payload. 
+    Publish the given topic with the given payload.
     payload=None deletes the retained topic.
-    If the payload is unchanged since the topic was last updated, it is NOT 
+    If the payload is unchanged since the topic was last updated, it is NOT
     republished unless 'always' is true.
     """
     client = _mqtt_client

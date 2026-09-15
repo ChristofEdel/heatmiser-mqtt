@@ -23,9 +23,10 @@ MQTT_RETAINED_EXPIRY_SECONDS: int | None = 24 * 60 * 60
 
 # Republish retained data when this fraction of its expiry has elapsed.
 MQTT_REFRESH_FRACTION = 0.80
-
+MQTT_CLIENT_NAME = 'heatmiser-mqtt'
 MQTT_HOST = "mqtt.internal"
 MQTT_PORT = 1883
 MQTT_CONNECT_RETRY_SECONDS = 5
+MQTT_AVAILABILITY_TIMER_SECONDS = 60
 
 MQTT_DISCOVERY_PREFIX = "homeassistant"
