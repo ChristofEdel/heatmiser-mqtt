@@ -23,6 +23,7 @@ from const import (
     MQTT_RETAINED_EXPIRY_SECONDS,
     MQTT_REFRESH_FRACTION,
     MQTT_AVAILABILITY_TIMER_SECONDS,
+    MQTT_KEEPALIVE_INTERVAL_SECONDS,
     LOGGER,
 )
 
@@ -111,15 +112,15 @@ def mqtt_start(
     if username is not None:
         client.username_pw_set(username, password)
 
-    # Create a 'last will and testament' for the .../availability
+    # Create a 'last will and testament' for the .../available
     # topic so it will report offline 'MQTT_AVAILABILITY_WILL_SECONDS'
     # after this bridge disconnects
     will_properties = Properties(PacketTypes.WILLMESSAGE)
     will_properties.WillDelayInterval = MQTT_AVAILABILITY_TIMER_SECONDS
 
     client.will_set(
-        f"{MQTT_ROOT}/availability",
-        payload="offline",
+        f"{MQTT_ROOT}/available",
+        payload="false",
         qos=MQTT_QOS,
         retain=True,
         properties=will_properties,
@@ -175,8 +176,8 @@ def _on_connect(client, userdata, flags, reason_code, properties) -> None:
 
     # Establish bridge availability.
     client.publish(
-        f"{MQTT_ROOT}/availability",
-        payload="online",
+        f"{MQTT_ROOT}/available",
+        payload="true",
         qos=MQTT_QOS,
         retain=True,
     )
@@ -240,11 +241,18 @@ def _zone_payloads(zone: ThermostatData) -> dict[str, str]:
 
     base = f"{MQTT_ROOT}/{zone.zone_id}"
 
-    result: dict[str, str] = {
-        f"{base}/online": "online" if zone.online else "offline",
-        f"{base}/is_timeclock": _bool_payload(zone.is_timeclock),
-    }
+    # Calculate new 'keepalive' value
+    now = time.time()
+    keepalive_cycle = math.floor((zone.keepalive - zone.keepalive_offset)/MQTT_KEEPALIVE_INTERVAL_SECONDS)
+    next_keepalive = (keepalive_cycle + 1) * MQTT_KEEPALIVE_INTERVAL_SECONDS + zone.keepalive_offset
+    if now >= next_keepalive:
+        zone.keepalive = now
 
+    result: dict[str, str] = {
+        f"{base}/online": _bool_payload(zone.online),
+        f"{base}/is_timeclock": _bool_payload(zone.is_timeclock),
+        f"{base}/keepalive": str(int(zone.keepalive)),
+    }
     if zone.zone_name:
         result[f"{base}/name"] = zone.zone_name
 
@@ -288,7 +296,7 @@ def _float_payload(value: float | None) -> str:
 # region Publishing topics
 #--------------------------------------------------------------------------------------------------
 
-def mqtt_publish_zones(zones: dict[int, ThermostatData]):
+def mqtt_publish_zones(zones: dict[int, ThermostatData]) -> None:
     """
     Publish the latest Heatmiser state.
 
@@ -486,8 +494,16 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> bo
         }
 
         availability = [
-            {"topic": f"{MQTT_ROOT}/availability"},
-            {"topic": f"{base}/online"},
+            {
+                "topic": f"{MQTT_ROOT}/available",
+                "payload_available": "true",
+                "payload_not_available": "false",
+            },
+            {
+                "topic": f"{base}/online",
+                "payload_available": "true",
+                "payload_not_available": "false",
+            },
         ]
 
         # ---------------------------------------------------------------
