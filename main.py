@@ -23,8 +23,7 @@ from mqtt_handler import (
     mqtt_set_command_processing_loop,
     mqtt_start,
     mqtt_stop,
-    mqtt_publish_zones,
-    mqtt_publish_homeassistant_discovery
+    mqtt_publish_zones
 )
 
 # endregion
@@ -186,7 +185,7 @@ async def get_and_process_engineers_data(websocket):
 
 async def main() -> int:
 
-    # set a 
+    # Tell the mqtt handler on which loop to execute commands
     mqtt_set_command_processing_loop(asyncio.get_running_loop())
 
     # Establish the connectin to the MQTT broker. After this initial connection succeeds,
@@ -217,9 +216,6 @@ async def main() -> int:
                 # ready for MQTT publishing
                 await get_and_process_live_data(websocket, log_new = False)
                 await get_and_process_engineers_data(websocket)
-
-                # Publish the discovery data for the zones we have now
-                mqtt_publish_homeassistant_discovery(all_zones)
 
                 # run the main loop until the websocket drops or we get killed
                 await run_connected(websocket)

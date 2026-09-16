@@ -312,6 +312,12 @@ def mqtt_publish_zones(zones: dict[int, ThermostatData]):
         force = _force_republish
         everything_ok = True
 
+        # First, publish discovery, but only if we are forced to republish
+        # everything
+        if force:
+            if not mqtt_publish_homeassistant_discovery(zones):
+                return
+
         # ---------------------------------------------------------------
         # Remove zones which no longer exist.
         # ---------------------------------------------------------------
@@ -457,11 +463,13 @@ def _refresh_due(topic: str, now: float) -> bool:
 # region Discovery configuration for home assistant
 #--------------------------------------------------------------------------------------------------
 
-def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> None:
+def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> bool:
     client = _mqtt_client
 
     if client is None or not _mqtt_connected.is_set():
-        return
+        return False
+
+    all_ok = True
 
     for zone_id, zone in zones.items():
 
@@ -473,7 +481,7 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> No
 
         device = {
             "identifiers": [f"heatmiser_zone_{zone_id}"],
-            "name": "Neostat " + zone.zone_name,
+            "name": zone.zone_name,
             "manufacturer": "Heatmiser",
         }
 
@@ -487,7 +495,7 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> No
         # ---------------------------------------------------------------
 
         thermostat_config = {
-            "name":                         zone.zone_name,
+            "name":                         None,
             "icon":                         "mdi:thermometer",
             "unique_id":                    f"heatmiser_{zone_id}_thermostat",
             "default_entity_id":            f"climate.heatmiser_{zone_id}_thermostat",
@@ -522,19 +530,21 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> No
             f"heatmiser_{zone_id}_thermostat/config"
         )
 
-        client.publish(
+        info = client.publish(
             topic,
             json.dumps(thermostat_config),
             qos=MQTT_QOS,
             retain=True,
         )
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            all_ok = False
 
         # ---------------------------------------------------------------
         # Floor limiter
         # ---------------------------------------------------------------
 
         floor_config = {
-            "name":                          zone.zone_name + " (Floor)",
+            "name":                          "(Floor)",
             "icon":                          "mdi:heating-coil",
             "unique_id":                     f"heatmiser_{zone_id}_floor",
             "default_entity_id":             f"climate.heatmiser_{zone_id}_floor",
@@ -568,12 +578,16 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> No
             f"heatmiser_{zone_id}_floor/config"
         )
 
-        client.publish(
+        info = client.publish(
             topic,
             json.dumps(floor_config),
             qos=MQTT_QOS,
             retain=True,
         )
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            all_ok = False
+
+    return all_ok
 
 # endregion
 #--------------------------------------------------------------------------------------------------
