@@ -2,13 +2,15 @@
 ```
 heatmiser/
 ├── available                           'true', 'false' after MQTT_AVAILABILITY_TIMER_SECONDS seconds 
-│                                       after disconnect
+│   |                                   after disconnect
+│   │
+│   └── keepalive                       unix time_t; refreshed every 30 seconds; primarily intended to
+|                                       help detecting communication issues
+│
 ├── 3/                                  GET_LIVE_DATA.DEVICE_ID
 │   ├── name                            GET_LIVE_DATA.ZONE_NAME
 │   ├── online                          GET_LIVE_DATA.ONLINE
 │   ├── is_timeclock                    'true'; GET_LIVE_DATA.TIMECLOCK not present ot 'false'
-│   ├── keepalive                       unix time_t; refreshed every 30 seconds; primarily intended to
-|   |                                   help detecting communication issues
 │   │
 │   ├── thermostat/
 │   │   ├── current_temperature         GET_LIVE_DATA.ACTUAL_TEMP

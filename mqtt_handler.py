@@ -241,17 +241,9 @@ def _zone_payloads(zone: ThermostatData) -> dict[str, str]:
 
     base = f"{MQTT_ROOT}/{zone.zone_id}"
 
-    # Calculate new 'keepalive' value
-    now = time.time()
-    keepalive_cycle = math.floor((zone.keepalive - zone.keepalive_offset)/MQTT_KEEPALIVE_INTERVAL_SECONDS)
-    next_keepalive = (keepalive_cycle + 1) * MQTT_KEEPALIVE_INTERVAL_SECONDS + zone.keepalive_offset
-    if now >= next_keepalive:
-        zone.keepalive = now
-
     result: dict[str, str] = {
         f"{base}/online": _bool_payload(zone.online),
         f"{base}/is_timeclock": _bool_payload(zone.is_timeclock),
-        f"{base}/keepalive": str(int(zone.keepalive)),
     }
     if zone.zone_name:
         result[f"{base}/name"] = zone.zone_name
@@ -376,6 +368,23 @@ def mqtt_publish_zones(zones: dict[int, ThermostatData]) -> None:
                 _zone_ids_published.add(zone_id)
             else:
                 everything_ok = False
+
+        if everything_ok:
+            keepalive_topic = f"{MQTT_ROOT}/keepalive"
+            last_keepalive = _last_published.get(keepalive_topic)
+            now = time.monotonic()
+
+            if (
+                force
+                or last_keepalive is None
+                or now - last_keepalive >= MQTT_KEEPALIVE_INTERVAL_SECONDS
+            ):
+                if not _publish_retained_topic(
+                    keepalive_topic,
+                    str(int(time.time())),
+                    always=True,
+                ):
+                    everything_ok = False
 
         if everything_ok:
             _force_republish = False

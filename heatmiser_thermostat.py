@@ -9,8 +9,6 @@ class ThermostatData:
     zone_id: int
     zone_name: str = ""
     is_timeclock: bool = False
-    keepalive: float = 0.0
-    keepalive_offset: float = 0.0
 
     online: bool = False
     current_temperature: float | None = None
@@ -32,7 +30,6 @@ class ThermostatData:
             "zone_id": self.zone_id,
             "zone_name": self.zone_name,
             "is_timeclock": self.is_timeclock,
-            "keepalive": self.keepalive,
             "online": self.online,
             "current_temperature": self.current_temperature,
             "target_temperature": self.target_temperature,
@@ -146,19 +143,6 @@ class ThermostatData:
         if self.is_timeclock:
             return
         self.floor_limit_temperature = self._temperature(neohub_data.get("FLOOR_LIMIT"))
-
-    @staticmethod
-    def redistribute_keepalive_offsets(all_zones: dict[int, ThermostatData], keepalive_interval_seconds: float) -> None:
-        zones = sorted(all_zones.values(), key=lambda zone: zone.zone_id)
-        count = len(zones)
-
-        if count == 0:
-            return
-
-        spacing = keepalive_interval_seconds / count
-
-        for index, zone in enumerate(zones):
-            zone.keepalive_offset = index * spacing
 
     @staticmethod
     def _temperature(value: Any) -> float | None:

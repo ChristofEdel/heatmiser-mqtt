@@ -22,7 +22,6 @@ from const import (
     MQTT_HOST,
     MQTT_PORT,
     MQTT_CONNECT_RETRY_SECONDS,
-    MQTT_KEEPALIVE_INTERVAL_SECONDS
 )
 from heatmiser_thermostat import ThermostatData
 from mqtt_handler import (
@@ -70,7 +69,6 @@ def get_or_add_zone_from_response(device_data, log_new: bool = False) -> Thermos
     if entry is None:
         entry = ThermostatData.create(zone_id, zone_name)
         all_zones[zone_id] = entry
-        ThermostatData.redistribute_keepalive_offsets(all_zones, MQTT_KEEPALIVE_INTERVAL_SECONDS)
         entry.update_from_heatmiser_live_data(device_data)
         if (log_new):
             LOGGER.info(f"Added zone {zone_id}: {zone_name}")
