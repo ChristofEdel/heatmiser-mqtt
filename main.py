@@ -13,6 +13,7 @@ from heatmiser_requests import (
     make_get_engineers_request,
     send_set_standby_command,
     send_set_temperature_setpoint_command,
+    send_set_hold_temperature_command,
     send_set_floor_limit_command,
 )
 from heatmiser_connection import open_neohub_websocket, close_neohub_websocket
@@ -198,10 +199,11 @@ async def main() -> int:
     # the MQTT module's network thread handles reconnection automatically.
     try:
         mqtt_set_command_handlers(
-            thermostat_set_enabled      = handle_device_enabled,
-            timeclock_set_enabled       = handle_device_enabled,
-            thermostat_set_temperature  = handle_set_temperature,
-            thermostat_set_floor_limit  = handle_set_floor_limit,
+            thermostat_set_enabled          = handle_device_enabled,
+            timeclock_set_enabled           = handle_device_enabled,
+            thermostat_set_temperature      = handle_set_temperature,
+            thermostat_set_hold_temperature = handle_set_hold_temperature,
+            thermostat_set_floor_limit      = handle_set_floor_limit,
         )
         await connect_mqtt_broker()
 
@@ -245,12 +247,17 @@ async def handle_set_temperature(zone_id: int, value: float) -> None:
         raise Exception(f"Invalid zone Id:{zone_id}")
     await send_set_temperature_setpoint_command(_neohub_websocket, zone.zone_name, value)
 
+async def handle_set_hold_temperature(zone_id: int, value: float | None) -> None:
+    zone = all_zones.get(zone_id, None)
+    if zone is None:
+        raise Exception(f"Invalid zone Id:{zone_id}")
+    await send_set_hold_temperature_command(_neohub_websocket, zone.zone_name, value)
+
 async def handle_set_floor_limit(zone_id: int, value: float) -> None:
     zone = all_zones.get(zone_id, None)
     if zone is None:
         raise Exception(f"Invalid zone Id:{zone_id}")
     await send_set_floor_limit_command(_neohub_websocket, zone.zone_name, value)
-
 
 async def connect_mqtt_broker() -> None:
     while True:

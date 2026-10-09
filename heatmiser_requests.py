@@ -61,6 +61,17 @@ async def send_set_temperature_setpoint_command(websocket, zone_name: str, temp_
     response = await _make_neohub_request(websocket, request)
     LOGGER.info(f"Neohub:  --> {response}")
 
+async def send_set_hold_temperature_command(websocket, zone_name: str, temp_setpoint: float):
+    # { 'HOLD': [ { 'temp':35.0, 'hours':0, 'minutes':5, 'id':'Force Zone X'}, ['X'] ] }
+    # { 'CANCEL_HGROUP': 'Force Zone 5'}
+    if temp_setpoint > 0:
+        request = f"{{ 'HOLD' : [ {{ 'temp': {temp_setpoint:.1f}, 'hours': 0, 'minutes': 5, 'id': 'Force {zone_name}' }}, ['{zone_name}'] ] }}"
+    else:
+        request = f"{{ 'CANCEL_HGROUP' : 'Force {zone_name}' }}"
+    LOGGER.info(f"Neohub: Command '{request}'")
+    response = await _make_neohub_request(websocket, request)
+    LOGGER.info(f"Neohub:  --> {response}")
+
 async def send_set_standby_command(websocket, zone_name: str, standby: bool):
     command = "FROST_ON" if standby else "FROST_OFF"
     request = f"{{ '{command}' : ['{zone_name}'] }}"

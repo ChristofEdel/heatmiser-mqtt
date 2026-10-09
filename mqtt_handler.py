@@ -66,24 +66,27 @@ _force_republish = True
 
 @dataclass(slots=True)
 class MqttCommandHandlers:
-    thermostat_set_enabled:     Callable[[int, bool],  Awaitable[None]] | None = None
-    thermostat_set_temperature: Callable[[int, float], Awaitable[None]] | None = None
-    thermostat_set_floor_limit: Callable[[int, float], Awaitable[None]] | None = None
-    timeclock_set_enabled:      Callable[[int, bool],  Awaitable[None]] | None = None
+    thermostat_set_enabled:          Callable[[int, bool],  Awaitable[None]] | None = None
+    thermostat_set_temperature:      Callable[[int, float], Awaitable[None]] | None = None
+    thermostat_set_hold_temperature: Callable[[int, float], Awaitable[None]] | None = None
+    thermostat_set_floor_limit:      Callable[[int, float], Awaitable[None]] | None = None
+    timeclock_set_enabled:           Callable[[int, bool],  Awaitable[None]] | None = None
 
 
 mqtt_handlers = MqttCommandHandlers()
 
 def mqtt_set_command_handlers(
-    thermostat_set_enabled: Callable[[int, bool], None] | None = None,
-    thermostat_set_temperature: Callable[[int, float], None] | None = None,
-    thermostat_set_floor_limit: Callable[[int, float], None] | None = None,
-    timeclock_set_enabled: Callable[[int, bool], None] | None = None,
+    thermostat_set_enabled:          Callable[[int, bool], None] | None = None,
+    thermostat_set_temperature:      Callable[[int, float], None] | None = None,
+    thermostat_set_hold_temperature: Callable[[int, float], None] | None = None,
+    thermostat_set_floor_limit:      Callable[[int, float], None] | None = None,
+    timeclock_set_enabled:           Callable[[int, bool], None] | None = None,
 ) -> None:
-    mqtt_handlers.thermostat_set_enabled     = thermostat_set_enabled
-    mqtt_handlers.thermostat_set_temperature = thermostat_set_temperature
-    mqtt_handlers.thermostat_set_floor_limit = thermostat_set_floor_limit
-    mqtt_handlers.timeclock_set_enabled      = timeclock_set_enabled
+    mqtt_handlers.thermostat_set_enabled          = thermostat_set_enabled
+    mqtt_handlers.thermostat_set_temperature      = thermostat_set_temperature
+    mqtt_handlers.thermostat_set_hold_temperature = thermostat_set_hold_temperature
+    mqtt_handlers.thermostat_set_floor_limit      = thermostat_set_floor_limit
+    mqtt_handlers.timeclock_set_enabled           = timeclock_set_enabled
 
 # endregion
 #--------------------------------------------------------------------------------------------------
@@ -169,6 +172,7 @@ def _on_connect(client, userdata, flags, reason_code, properties) -> None:
         [
             (f"{MQTT_ROOT}/+/thermostat/set/enabled", MQTT_QOS),
             (f"{MQTT_ROOT}/+/thermostat/set/target_temperature", MQTT_QOS),
+            (f"{MQTT_ROOT}/+/thermostat/set/hold_temperature", MQTT_QOS),
             (f"{MQTT_ROOT}/+/floor/set/limit_temperature", MQTT_QOS),
             (f"{MQTT_ROOT}/+/timeclock/set/enabled", MQTT_QOS),
         ]
@@ -254,12 +258,12 @@ def _zone_payloads(zone: ThermostatData) -> dict[str, str]:
 
     else:
         result[f"{base}/thermostat/current_temperature"] = _float_payload(zone.current_temperature)
-        result[f"{base}/thermostat/target_temperature"] = _float_payload(zone.target_temperature)
+        result[f"{base}/thermostat/target_temperature"]  = _float_payload(zone.target_temperature)
         result[f"{base}/thermostat/enabled"]             = _bool_payload(zone.enabled)
-        result[f"{base}/thermostat/demand"]         = _bool_payload(zone.demand)
-        result[f"{base}/floor/current_temperature"] = _float_payload(zone.floor_current_temperature)
-        result[f"{base}/floor/limit_temperature"]   = _float_payload(zone.floor_limit_temperature)
-        result[f"{base}/floor/limit_active"]        = _bool_payload(zone.floor_limit_active)
+        result[f"{base}/thermostat/demand"]              = _bool_payload(zone.demand)
+        result[f"{base}/floor/current_temperature"]      = _float_payload(zone.floor_current_temperature)
+        result[f"{base}/floor/limit_temperature"]        = _float_payload(zone.floor_limit_temperature)
+        result[f"{base}/floor/limit_active"]             = _bool_payload(zone.floor_limit_active)
 
     return result
 
@@ -623,10 +627,11 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> bo
 #--------------------------------------------------------------------------------------------------
 
 _MQTT_COMMANDS = {
-    ("thermostat", "enabled"):            ("thermostat_set_enabled",     "bool"),
-    ("thermostat", "target_temperature"): ("thermostat_set_temperature", "float"),
-    ("floor",      "limit_temperature"):  ("thermostat_set_floor_limit", "float"),
-    ("timeclock",  "enabled"):            ("timeclock_set_enabled",      "bool"),
+    ("thermostat", "enabled"):            ("thermostat_set_enabled",          "bool"),
+    ("thermostat", "target_temperature"): ("thermostat_set_temperature",      "float"),
+    ("thermostat", "hold_temperature"):   ("thermostat_set_hold_temperature", "float"),
+    ("floor",      "limit_temperature"):  ("thermostat_set_floor_limit",      "float"),
+    ("timeclock",  "enabled"):            ("timeclock_set_enabled",           "bool"),
 }
 
 
@@ -730,6 +735,10 @@ def _parse_bool(payload: str) -> bool:
 
 
 def _parse_float(payload: str) -> float:
+
+    if payload.strip().lower() == "null" or payload.strip() == "":
+        return 0;
+
     value = float(payload.strip())
 
     if not math.isfinite(value):

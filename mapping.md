@@ -19,7 +19,8 @@ heatmiser/
 │   │   ├── demand                      GET_LIVE_DATA.HEAT_ON
 │   │   └── set/
 │   │       ├── enabled                 command: FROST_OFF
-│   │       └── target_temperature      command: SET_TEMP
+│   │       ├── target_temperature      command: SET_TEMP
+│   │       └── hold_temperature        command: HOLD / CANCEL_HGROUP
 │   │
 │   └── floor/
 │       ├── current_temperature         GET_LIVE_DATA.CURRENT_FLOOR_TEMPERATURE
