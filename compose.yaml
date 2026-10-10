@@ -4,6 +4,11 @@ services:
     image: heatmiser-mqtt:latest
     container_name: heatmiser-mqtt
     restart: unless-stopped
+    environment:
+      NEOHUB_HOST: "192.168.1.139"
+      MQTT_ROOT: "heatmiser-test"
+      MQTT_HOST: "mqtt.internal"
+      MQTT_CLIENT_NAME: "heatmiser-mqtt-test"
 
     # Ensure signals/process cleanup are handled properly
     init: true
