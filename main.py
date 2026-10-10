@@ -247,7 +247,7 @@ async def handle_set_temperature(zone_id: int, value: float) -> None:
         raise Exception(f"Invalid zone Id:{zone_id}")
     await send_set_temperature_setpoint_command(_neohub_websocket, zone.zone_name, value)
 
-async def handle_set_hold_temperature(zone_id: int, value: float | None) -> None:
+async def handle_set_hold_temperature(zone_id: int, value: str) -> None:
     zone = all_zones.get(zone_id, None)
     if zone is None:
         raise Exception(f"Invalid zone Id:{zone_id}")

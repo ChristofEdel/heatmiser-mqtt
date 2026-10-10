@@ -68,7 +68,7 @@ _force_republish = True
 class MqttCommandHandlers:
     thermostat_set_enabled:          Callable[[int, bool],  Awaitable[None]] | None = None
     thermostat_set_temperature:      Callable[[int, float], Awaitable[None]] | None = None
-    thermostat_set_hold_temperature: Callable[[int, float], Awaitable[None]] | None = None
+    thermostat_set_hold_temperature: Callable[[int, str], Awaitable[None]] | None = None
     thermostat_set_floor_limit:      Callable[[int, float], Awaitable[None]] | None = None
     timeclock_set_enabled:           Callable[[int, bool],  Awaitable[None]] | None = None
 
@@ -78,7 +78,7 @@ mqtt_handlers = MqttCommandHandlers()
 def mqtt_set_command_handlers(
     thermostat_set_enabled:          Callable[[int, bool], None] | None = None,
     thermostat_set_temperature:      Callable[[int, float], None] | None = None,
-    thermostat_set_hold_temperature: Callable[[int, float], None] | None = None,
+    thermostat_set_hold_temperature: Callable[[int, str], None] | None = None,
     thermostat_set_floor_limit:      Callable[[int, float], None] | None = None,
     timeclock_set_enabled:           Callable[[int, bool], None] | None = None,
 ) -> None:
@@ -629,7 +629,7 @@ def mqtt_publish_homeassistant_discovery(zones: dict[int, ThermostatData]) -> bo
 _MQTT_COMMANDS = {
     ("thermostat", "enabled"):            ("thermostat_set_enabled",          "bool"),
     ("thermostat", "target_temperature"): ("thermostat_set_temperature",      "float"),
-    ("thermostat", "hold_temperature"):   ("thermostat_set_hold_temperature", "float"),
+    ("thermostat", "hold_temperature"):   ("thermostat_set_hold_temperature", "string"),
     ("floor",      "limit_temperature"):  ("thermostat_set_floor_limit",      "float"),
     ("timeclock",  "enabled"):            ("timeclock_set_enabled",           "bool"),
 }
@@ -720,6 +720,8 @@ def _parse(payload: str, type: str):
         return _parse_bool(payload)
     elif type == "float":
         return _parse_float(payload)
+    elif type == "string":
+        return payload
     return None
     
 def _parse_bool(payload: str) -> bool:

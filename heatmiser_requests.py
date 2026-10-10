@@ -3,6 +3,7 @@
 #--------------------------------------------------------------------------------------------------
 
 import json
+import math
 from pathlib import Path
 import asyncio
 from const import REQUEST_TIMEOUT_SECONDS, LOGGER
@@ -54,20 +55,79 @@ async def send_set_floor_limit_command(websocket, zone_name: str, limit_temp: fl
     response = await _make_neohub_request(websocket, request)
     LOGGER.info(f"Neohub:  --> {response}")
 
-async def send_set_temperature_setpoint_command(websocket, zone_name: str, temp_setpoint: float):
+async def send_set_temperature_setpoint_command(websocket, zone_name: str, setpoint: float):
     # { 'SET_TEMP' :[21.5, '<zone name>'] }
-    request = f"{{ 'SET_TEMP' : [{temp_setpoint:.1f}, '{zone_name}'] }}"
+    request = f"{{ 'SET_TEMP' : [{setpoint:.1f}, '{zone_name}'] }}"
     LOGGER.info(f"Neohub: Command '{request}'")
     response = await _make_neohub_request(websocket, request)
     LOGGER.info(f"Neohub:  --> {response}")
 
-async def send_set_hold_temperature_command(websocket, zone_name: str, temp_setpoint: float):
+async def send_set_hold_temperature_command(websocket, zone_name: str, payload: str):
     # { 'HOLD': [ { 'temp':35.0, 'hours':0, 'minutes':5, 'id':'Force Zone X'}, ['X'] ] }
     # { 'CANCEL_HGROUP': 'Force Zone 5'}
-    if temp_setpoint > 0:
-        request = f"{{ 'HOLD' : [ {{ 'temp': {temp_setpoint:.1f}, 'hours': 0, 'minutes': 5, 'id': 'Force {zone_name}' }}, ['{zone_name}'] ] }}"
+
+    payload = payload.strip()
+
+    # Three options for payload:
+    # 1. JSON object with "setpoint" and "duration" keys
+    # 2. A number (float or int) for the setpoint, with a default duration of 10 minutes
+    #    (zero cancels the hold)
+    # 3. An empty payload (or a payload with text "null"), which cancels the hold
+
+    setpoint: int | float | None = None
+    duration = 0
+
+    # Case 3: empty payload or "null"
+    if not payload or payload.lower() == "null":
+        # Empty payload or "null" cancels the hold
+        setpoint = None
+        duration = 0
+
+    # Case 1: JSON object with "setpoint" and "duration" keys
+    elif payload.startswith("{"):
+        try:
+            hold = json.loads(payload)
+        except json.JSONDecodeError as error:
+            raise ValueError("Hold payload must be valid JSON") from error
+
+        if not isinstance(hold, dict):
+            raise ValueError("Hold JSON payload must be an object")
+        if hold:
+            if "setpoint" not in hold or "duration" not in hold:
+                raise ValueError(
+                    "Hold JSON payload must contain 'setpoint' and 'duration'"
+                )
+
+            setpoint = hold["setpoint"]
+            duration = hold["duration"]
+            if isinstance(setpoint, bool) or not isinstance(setpoint, (int, float)):
+                raise ValueError("Hold setpoint must be a number")
+            if isinstance(duration, bool) or not isinstance(duration, int):
+                raise ValueError("Hold duration must be an integer number of minutes")
+
+    # A number (float or int) for the setpoint
     else:
+        try:
+            setpoint = float(payload)
+        except ValueError as error:
+            raise ValueError( "Hold payload must be a number or a JSON object") from error
+        duration = 10
+
+    # Send the appropriate command to the Neohub
+    if setpoint is None or setpoint == 0:
         request = f"{{ 'CANCEL_HGROUP' : 'Force {zone_name}' }}"
+    else:
+        if not math.isfinite(setpoint):
+            raise ValueError("Hold setpoint must be finite")
+        if duration < 0:
+            raise ValueError("Hold duration cannot be negative")
+        hours, minutes = divmod(duration, 60)
+        request = (
+            f"{{ 'HOLD' : [ {{ 'temp': {setpoint:.1f}, "
+            f"'hours': {hours}, 'minutes': {minutes}, "
+            f"'id': 'Force {zone_name}' }}, ['{zone_name}'] ] }}"
+        )
+
     LOGGER.info(f"Neohub: Command '{request}'")
     response = await _make_neohub_request(websocket, request)
     LOGGER.info(f"Neohub:  --> {response}")

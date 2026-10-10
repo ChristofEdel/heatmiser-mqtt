@@ -20,7 +20,10 @@ heatmiser/
 │   │   └── set/
 │   │       ├── enabled                 command: FROST_OFF
 │   │       ├── target_temperature      command: SET_TEMP
-│   │       └── hold_temperature        command: HOLD / CANCEL_HGROUP
+│   │       └── hold_temperature        command: HOLD / CANCEL_HGROUP; 
+│   │                                   JSON {"setpoint":21.5,"duration":90} for minutes,
+|   |                                   a float is equivalent to { "setpoint": <float>, "duration": 10 }
+│   │                                   empty payload, null, 0 or {} to cancel
 │   │
 │   └── floor/
 │       ├── current_temperature         GET_LIVE_DATA.CURRENT_FLOOR_TEMPERATURE
